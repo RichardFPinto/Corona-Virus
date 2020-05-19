@@ -1,188 +1,100 @@
-#bibliotecas
+#packages
 library(stringr)
 library(dplyr)
 library(forecast)
 library(ggplot2)
+library(RCurl)
+library(xts)
+#
 
-# fazendo o download do dataset
-arquivourl = "https://covid.ourworldindata.org/data/full_data.csv"
-destino = "G:/Github/Projetos Prontos/20200303 Corona Virus/1 - Dados Originais/full_data.csv"
-download.file(arquivourl, destino, method = "curl")
+# download dataset
+# https://covid.ourworldindata.org/data/owid-covid-data.csv
+fileurl = "https://covid.ourworldindata.org/data/owid-covid-data.csv"
+localD = "G:/Github/Projetos Prontos/20200303 Corona Virus/1 - Dados Originais/owid-covid-data.csv"
+download.file(fileurl, localD, method = "curl")
 
-# carregando os dados, eles foram retirados do link:https://www.kaggle.com/sudalairajkumar/novel-corona-virus-2019-dataset
+# reference link:https://ourworldindata.org/coronavirus-source-data
 setwd("G:/Github/Projetos Prontos/20200303 Corona Virus/1 - Dados Originais/")
 
-df_corona = read.csv("full_data.csv")
-head(df_corona)
-# Criando uma curva de regressão que mais se adapta a curva de crescimento das infecções do corona virus
+df_covid = read.csv("owid-covid-data.csv")
+head(df_covid)
 
-df_brasil = df_corona %>% filter(location == "Brazil")
-df_brasil
-tc_brasil = df_brasil[,c(1,5)]
-tc_brasil
+# organize time series
 
-df_italia = df_corona %>% filter(location == "Italy")
-df_italia
-tc_italia = df_italia[,c(1,5)]
-tc_italia
+df = df_covid %>% filter(location == "World")
+tail(df)
+tc = df[,c(3,4)]
+tc
 
-df_china = df_corona %>% filter(location == "China")
-df_china
-tc_china = df_china[,c(1,5)]
-tc_china
+scatter.smooth(x=tc$date, tc$total_cases, main="Date ~ Total Cases")
 
-plot(tc_china$date,tc_china$total_cases,type="l")
-lines(tc_brasil$date,tc_brasil$total_cases)
-lines(tc_italia$date,tc_italia$total_cases)
+ts = ts(tc$total_cases)
+ts
+time = as.integer(length(ts)*0.7)
+f_time = length(ts)
+# test better model
+train = window(ts, start= 1, end= time)
+test = window(ts, start=time, end=f_time)
+f_time - time
+DFor =  f_time - time
 
-scatter.smooth(x=tc_china$date, tc_china$total_cases, main="Data ~ Infectados - China")
-scatter.smooth(x=tc_italia$date, tc_italia$total_cases, main="Data ~ Infectado - Italia")
-scatter.smooth(x=tc_brasil$date, tc_brasil$total_cases, main="Data ~ Infectado - Brasil")
+#naive
+naive = naive(train, h=DFor)
 
-time_br = 1:nrow(tc_brasil)
-time_br
-# modelo simples
-mbr = lm(total_cases ~ time_br, data=tc_brasil)
-plot(total_cases ~ time_br , data=tc_brasil)
-abline(mbr)
-anova(mbr)
-print(mbr)
-summary(mbr)
+#mean
+meanf = meanf(train, h=DFor)
 
+#drift
+rwf = rwf(train, h=DFor, drift = T)
 
-# modelo com logaritmo
-mbr2 = lm(log(total_cases) ~ time_br, data=tc_brasil)
-plot(log(total_cases) ~ time_br , data=tc_brasil)
-abline(mbr2)
-anova(mbr2)
-print(mbr2)
-summary(mbr2)
+#holt - pesos
+holt = holt(train, h=DFor)
 
-# fazendo a predição
-x = predict(mbr2,data.frame(time_br = (nrow(tc_brasil)+1)))
-print(exp(x))
+#arima
+arima = auto.arima(train)
+arima = forecast(arima, h=DFor)
 
-# fazer para a italia, mas não farei para a china pois já está controlado lá
+#linear
+tslm = tslm(train ~ trend, data=train)
+tslm = forecast(tslm, h=DFor)
 
-time_ita = 1:nrow(tc_italia)
-time_ita
-# modelo simples
-mita = lm(total_cases ~ time_ita, data=tc_italia)
-plot(total_cases ~ time_ita , data=tc_italia)
-abline(mita)
-anova(mita)
-print(mita)
-summary(mita)
+#rede neural
+nnetar = nnetar(train)
+nnetar = forecast(nnetar, h=DFor)
+nnetar
 
+# acurracy
+anaive = accuracy(test,naive$mean)
+ameanf = accuracy(test,meanf$mean)
+arwf = accuracy(test,rwf$mean)
+aholt = accuracy(test,holt$mean)
+aarima = accuracy(test,arima$mean)
+atslm = accuracy(test,tslm$mean)
+annetar = accuracy(test,nnetar$mean)
 
-# modelo com logaritmo
-mita2 = lm(log(total_cases) ~ time_ita, data=tc_italia)
-plot(log(total_cases) ~ time_ita , data=tc_italia)
-abline(mita2)
-anova(mita2)
-print(mita2)
-summary(mita2)
+acurracy = rbind(anaive,ameanf,arwf,aholt,aarima,atslm,annetar)
+Names = c("Naive","Mean","Drift","Holt","Arima","Linear Regression", "Neural Net")
+acurracy = cbind(Names,acurracy)
+acurracy
+# plot
+plot(ts, main = "Forecast Benchmark")
+lines(naive$mean, type="l", pch=22, lty=6,  col="red", lwd=2)
+lines(meanf$mean, type="l", pch=22, lty=5,  col="blue", lwd=2)
+lines(rwf$mean,  type="l", pch=22, lty=4, col="green",lwd=2)
+lines(holt$mean, type="l", pch=22, lty=3,  col="orange", lwd=2)
+lines(arima$mean, type="l", pch=22, lty=5,  col="maroon", lwd=2)
+lines(tslm$mean, type="l", pch=22, lty=4,  col="cyan",lwd=2)
+lines(nnetar$mean,  type="l", pch=22, lty=3, col="yellow",lwd=2)
+legend("bottomleft",legend=c("Naive","Mean","Dri.","Hol.","Ari.","LR","NN"),
+       col = c("red","blue","green","orange","maroon","cyan","yellow"),
+       lty=1:2, cex=0.8, ncol = 2,lwd=4)
 
-# fazendo a predição
-x = predict(mita2,data.frame(time_ita = (nrow(tc_italia)+1)))
-print(exp(x))
-
-# agora vamos fazer para o mundo inteiro
-
-df_mundo = df_corona %>% filter(location == "World")
-df_mundo
-tc_mundo = df_mundo[,c(1,5)]
-tc_mundo
-# plotando grafico
-scatter.smooth(x=tc_mundo$date, tc_mundo$total_cases, main="Data ~ Infectado - No Mundo")
-# fazendo uma variavel com os dias
-time_m = 1:nrow(tc_mundo)
-time_m
-# fazendo a regressão simples dos dados
-mm = lm(total_cases ~ time_m, data=tc_mundo)
-plot(total_cases ~ time_m , data=tc_mundo)
-abline(mm)
-anova(mm)
-print(mm)
-summary(mm)
-x = predict(mm,data.frame(time_m = (nrow(tc_mundo)+1)))
-print(x)
-# fazendo a regressão logaritmica
-tc_mundo$total_cases
-mm2 = lm(log(total_cases) ~ time_m, data=tc_mundo)
-plot(log(total_cases) ~ time_m , data=tc_mundo)
-abline(mm2)
-anova(mm2)
-print(mm2)
-summary(mm2)
-
-x = predict(mm2,data.frame(time_m = (nrow(tc_mundo)+1)))
-print(exp(x))
-
-
-
-# tentando fazer com a previsão usando media moveis
-# ordem 5
-mediamundo1 = ma(tc_mundo$total_cases, order = 5 )
-autoplot(mediamundo1)
-mm5mundo= lm(mediamundo1 ~ time_m)
-plot(mediamundo1 ~ time_m , data=tc_mundo)
-abline(mm5mundo)
-
-
-mediamundo2 = ma(tc_mundo$total_cases, order = 8 )
-autoplot(mediamundo2)
-mm8mundo= lm(mediamundo2 ~ time_m)
-plot(mediamundo2 ~ time_m , data=tc_mundo)
-abline(mm8mundo)
-
-
-mediamundo3 = ma(tc_mundo$total_cases, order = 10 )
-autoplot(mediamundo3)
-mm10mundo= lm(mediamundo3 ~ time_m)
-plot(mediamundo3 ~ time_m , data=tc_mundo)
-abline(mm10mundo)
-
-plot(tc_mundo)
-lines(mediamundo1, col = "blue")
-lines(mediamundo2, col = "red")
-lines(mediamundo3, col = "green")
-legend("topleft",legend=c("Orig.","MM5","MM8","MM10"), col = c("black","blue","red","green"), lty=1:2, cex=0.8,)
-
-# usando o autoarima para prever
-ts_mundo = ts(tc_mundo$total_cases)
-ts_mundo
-
-modelo = auto.arima(ts_mundo, trace = T,stepwise = F, approximation = F )
-print(modelo)
-previsão = forecast(modelo,h=4)
-plot(previsão)
-lines(previsão$mean, col = "red")
-
-print(previsão$mean)
-
-# vamos usar o auto-arima para prever do brasil e italia
-# brasil
-ts_brasil = ts(tc_brasil$total_cases)
-ts_brasil
-
-modelobr = auto.arima(ts_brasil, trace = T,stepwise = F, approximation = F )
-print(modelobr)
-previsãobr = forecast(modelobr,h=4)
-plot(previsãobr)
-lines(previsãobr$mean, col = "red")
-
-print(previsãobr)
-print(previsãobr$mean)
-
-# italia
-ts_italia = ts(tc_italia$total_cases)
-ts_italia
-
-modeloita = auto.arima(ts_italia, trace = T,stepwise = F, approximation = F )
-print(modeloita)
-previsãoita = forecast(modeloita,h=4)
-plot(previsãoita)
-lines(previsãoita$mean, col = "red")
-
-print(previsãoita$mean)
+# Forecast
+# best models
+# 1°
+FHolt = holt(ts, h=5)
+FHolt$mean
+# 2°
+FArima = auto.arima(ts)
+FArima = forecast(FArima, h = 5)
+FArima$mean
